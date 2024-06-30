@@ -46,7 +46,9 @@ function Doc:reset()
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
   self.clean_change_id = 1
-  self.highlighter = Highlighter(self)
+  if not self.highlighter then
+    self.highlighter = Highlighter(self)
+  end
   self.overwrite = false
   self:reset_syntax()
 end
@@ -139,7 +141,7 @@ function Doc:load(filename)
     table.insert(self.lines, "\n")
   end
   fp:close()
-  self:reset_syntax()
+  self.highlighter:reset()
 end
 
 
@@ -818,6 +820,10 @@ end
 
 -- For plugins to get notified when a document is closed
 function Doc:on_close()
+  -- ensure doc is garbage collected
+  self.highlighter.thread:stop()
+  self.highlighter.doc = nil
+  self.highlighter.thread.doc = nil
   core.log_quiet("Closed doc \"%s\"", self:get_name())
 end
 

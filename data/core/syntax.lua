@@ -7,6 +7,10 @@ syntax.plain_text_syntax = { name = "Plain Text", patterns = {}, symbols = {} }
 
 
 function syntax.add(t)
+  -- save the plugin name
+  t.language_plugin = common.basename(debug.getinfo(2, "S").source:sub(2))
+    :gsub("%.lua$", "")
+
   if type(t.space_handling) ~= "boolean" then t.space_handling = true end
 
   if t.patterns then

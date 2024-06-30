@@ -1,8 +1,9 @@
 local core = require "core"
-local common = require "core.common"
 local config = require "core.config"
+local common = require "core.common"
 local tokenizer = require "core.tokenizer"
 local Object = require "core.object"
+local HighlighterThread = require "core.doc.highlighter.thread"
 
 
 local Highlighter = Object:extend()
@@ -11,6 +12,7 @@ local Highlighter = Object:extend()
 function Highlighter:new(doc)
   self.doc = doc
   self.running = false
+  self.thread = HighlighterThread(self.doc)
   self:reset()
 end
 
@@ -18,7 +20,43 @@ end
 function Highlighter:start()
   if self.running then return end
   self.running = true
+  self.thread:tokenize(self.first_invalid_line, self.max_wanted_line)
+  print("wanted", self.first_invalid_line, self.max_wanted_line)
   core.add_thread(function()
+    if self.thread:is_active() then
+      print "running"
+      local tokenized, valid_lines = 0, true
+      local start_time = system.get_time()
+      while true do
+        local output = self.thread:get_next_line()
+        if type(output) == "table" then
+          if output.line.text == self.doc:get_utf8_line(output.idx) then
+            tokenized = output.idx
+            self.first_invalid_line = output.idx + 1
+            self.lines[output.idx] = output.line
+            self:update_notify(output.idx, 0)
+          else
+            valid_lines = false
+            print("not updating line", output.idx, self.doc.abs_filename)
+          end
+        elseif output == "done" then
+          if valid_lines then
+            if tokenized >= self.max_wanted_line then
+              print("stop")
+              self.max_wanted_line = 0
+              self.running = false
+              return
+            end
+          else
+            valid_lines = true
+          end
+        end
+        if system.get_time() - start_time > 0.5 / config.fps then
+          coroutine.yield()
+          start_time = system.get_time()
+        end
+      end
+    end
     local views = #core.get_views_referencing_doc(self.doc)
     while self.first_invalid_line <= self.max_wanted_line do
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
@@ -90,17 +128,19 @@ function Highlighter:invalidate(idx)
 end
 
 function Highlighter:insert_notify(line, n)
-  self:invalidate(line)
   local blanks = { }
   for i = 1, n do
     blanks[i] = false
   end
   common.splice(self.lines, line, 0, blanks)
+  self.thread:insert_lines(line, n)
+  self:invalidate(line)
 end
 
 function Highlighter:remove_notify(line, n)
-  self:invalidate(line)
   common.splice(self.lines, line, n)
+  self.thread:remove_lines(line, n)
+  self:invalidate(line)
 end
 
 function Highlighter:update_notify(line, n)
