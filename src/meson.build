@@ -118,15 +118,5 @@ executable('pragtical',
     link_args: pragtical_link_args,
     install_dir: pragtical_bindir,
     install: true,
-    win_subsystem: 'windows',
+    win_subsystem: 'console'
 )
-
-if host_machine.system() == 'windows'
-    executable('pragtical',
-        'main_com.c',
-        name_suffix: 'com',
-        install_dir: pragtical_bindir,
-        install: true,
-        win_subsystem: 'console'
-    )
-endif
