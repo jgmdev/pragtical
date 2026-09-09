@@ -16,6 +16,8 @@ local config = require "core.config"
 ---@field show_leading boolean
 ---Show white spaces at the end of a line.
 ---@field show_trailing boolean
+---Replace trailing space markers with error-colored blocks.
+---@field show_trailing_error boolean
 ---Show white spaces between words.
 ---@field show_middle boolean
 ---Show white spaces on selected text only.
@@ -46,6 +48,7 @@ config.plugins.drawwhitespace = common.merge({
   enabled = false,
   show_leading = true,
   show_trailing = true,
+  show_trailing_error = false,
   show_middle = true,
   show_selected_only = false,
 
@@ -122,28 +125,6 @@ config.plugins.drawwhitespace = common.merge({
       path = "show_trailing_error",
       type = "toggle",
       default = false,
-      on_apply = function(enabled)
-        local found = nil
-        local substitutions = config.plugins.drawwhitespace.substitutions
-        for i, sub in ipairs(substitutions) do
-          if sub.trailing_error then
-            found = i
-          end
-        end
-        if found == nil and enabled then
-          table.insert(substitutions, {
-            char = " ",
-            sub = "█",
-            show_leading = false,
-            show_middle = false,
-            show_trailing = true,
-            trailing_color = style.error,
-            trailing_error = true
-          })
-        elseif found ~= nil and not enabled then
-          table.remove(substitutions, found)
-        end
-      end
     }
   }
 }, config.plugins.drawwhitespace)
@@ -286,6 +267,11 @@ function DocView:draw_line_text(idx, x, y)
       end
 
       if draw then
+        local marker = sub
+        if char == " " and ae >= line_len
+        and get_option(substitution, "show_trailing_error") then
+          marker, color = "█", style.error
+        end
         -- We need to draw tabs one at a time because they might have a
         -- different size than the substituting character.
         -- This also applies to any other char if we use non-monospace fonts
@@ -293,10 +279,10 @@ function DocView:draw_line_text(idx, x, y)
         if char == "\t" then
           for i = as,ae-1 do
             tx = self:get_col_x_offset(idx, i) + x
-            tx = renderer.draw_text(font, sub, tx, ty, color)
+            tx = renderer.draw_text(font, marker, tx, ty, color)
           end
         else
-          tx = renderer.draw_text(font, string.rep(sub, ae - as), tx, ty, color)
+          tx = renderer.draw_text(font, string.rep(marker, ae - as), tx, ty, color)
         end
 
         end
