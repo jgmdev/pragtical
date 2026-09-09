@@ -4,6 +4,7 @@ sdl_dep = dependency('sdl3', version: '>=3.4.0')
 
 img_args = []
 img_dependencies = [sdl_dep]
+img_dynamic_dependencies = []
 
 if host_machine.system() == 'windows'
   libprefix = ''
@@ -25,6 +26,7 @@ img_args += '-DSDL_IMAGE_USE_COMMON_BACKEND'
 # AVIF
 avif_dep = dependency('libavif', required: false)
 if avif_dep.found()
+  img_dynamic_dependencies += avif_dep
   img_args += '-DLOAD_AVIF'
   img_args += '-DLOAD_AVIF_DYNAMIC="@0@avif@1@"'.format(libprefix, libext)
 endif
@@ -41,6 +43,7 @@ img_args += '-DLOAD_JPG'
 # JXL
 jxl_dep = dependency('libjxl', required: false)
 if jxl_dep.found()
+  img_dynamic_dependencies += jxl_dep
   img_args += '-DLOAD_JXL'
   img_args += '-DLOAD_JXL_DYNAMIC="@0@jxl@1@"'.format(libprefix, libext)
 endif
@@ -70,16 +73,18 @@ img_args += '-DLOAD_TGA'
 if host_machine.system() != 'darwin'
   tiff_dep = dependency('libtiff', 'libtiff-4', required: false)
   if tiff_dep.found()
+    img_dynamic_dependencies += tiff_dep
     img_args += '-DLOAD_TIF'
     img_args += '-DLOAD_TIF_DYNAMIC="@0@tiff@1@"'.format(libprefix, libext)
   endif
 endif
 
-# WEBP - seems to require more effort since it is not working :-(
+# WEBP
 webp_dep = dependency('libwebp', required: false)
 webpmux_dep = dependency('libwebpmux', required: false)
 webpdemux_dep = dependency('libwebpdemux', required: false)
 if webp_dep.found() and webpdemux_dep.found() and webpmux_dep.found()
+  img_dynamic_dependencies += [webp_dep, webpmux_dep, webpdemux_dep]
   img_args += '-DLOAD_WEBP'
   img_args += '-DLOAD_WEBP_DYNAMIC="@0@webp@1@"'.format(libprefix, libext)
   img_args += '-DLOAD_WEBPMUX_DYNAMIC="@0@webpmux@1@"'.format(libprefix, libext)
@@ -94,6 +99,12 @@ img_args += '-DLOAD_XPM'
 
 # XV
 img_args += '-DLOAD_XV'
+
+# Runtime-loaded codecs still need their headers and compiler flags, without
+# adding link-time dependencies on their shared libraries.
+foreach dep : img_dynamic_dependencies
+  img_dependencies += dep.partial_dependency(compile_args: true, includes: true)
+endforeach
 
 
 subdir('src')
