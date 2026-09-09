@@ -239,6 +239,8 @@ local function input_stress(abs_path)
   end
 
   dv.doc:clear_undo_redo()
+  -- Discard temporary training edits without opening a save prompt.
+  dv.doc:clean()
   command.perform "root:close"
 end
 
@@ -636,7 +638,7 @@ core.add_background_thread(function()
 
   core.log("Draw rect stress")
   coroutine.yield()
-  local node = core.root_view:get_active_node()
+  local node = core.root_view:get_active_node_default()
   local c = Cube()
   node:add_view(c)
   core.set_active_view(c)
