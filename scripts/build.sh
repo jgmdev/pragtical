@@ -203,26 +203,52 @@ main() {
     -Doptimization=3 \
     "${build_dir}"
 
+  local profile_dir
+  if [[ -n $pgo ]]; then
+    local compiler_id
+    compiler_id=$(meson introspect --compilers "${build_dir}" | python3 -c \
+      'import json, sys; print(json.load(sys.stdin)["host"]["c"]["id"])')
+    if [[ $compiler_id == *clang* ]]; then
+      # Capture both build tools and the editor, regardless of runtime chdir.
+      profile_dir="$(cd "${build_dir}" && pwd)/pgo"
+      mkdir -p "$profile_dir"
+      export LLVM_PROFILE_FILE="$profile_dir/default_%m.profraw"
+    fi
+  fi
+
   meson compile -C "${build_dir}"
 
   if [[ $pgo != "" ]]; then
     echo "Generating Profiler Guided Optimizations data..."
     export SDL_VIDEO_DRIVER="dummy"
+    local timeout_command=timeout
     if [[ $platform == "macos" ]]; then
-      gtimeout 120s ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua || true
-    else
-      timeout 120s ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua || true
+      timeout_command=gtimeout
     fi
-    # in case of clang handle the profile data appropriately
-    if ls scripts/lua | grep default ; then
+    # Let pgo.lua's five-minute limit quit cleanly so LLVM can flush profiles.
+    if ! "$timeout_command" --kill-after=10s 330s ./scripts/run-local \
+      -debug "${build_dir}" run -n scripts/lua/pgo.lua; then
+      echo "Error: PGO training failed; refusing to build with incomplete profiles." >&2
+      return 1
+    fi
+    if [[ -n $profile_dir ]]; then
+      local profiles=("$profile_dir"/*.profraw)
+      if [[ ! -f ${profiles[0]} ]]; then
+        echo "Error: PGO training produced no LLVM profiles in $profile_dir." >&2
+        return 1
+      fi
       if [[ $platform == "macos" ]]; then
-        xcrun llvm-profdata merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
+        xcrun llvm-profdata merge -output="${build_dir}"/default.profdata "${profiles[@]}"
       else
         if command -v llvm-profdata-14 ; then
-          llvm-profdata-14 merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
+          llvm-profdata-14 merge -output="${build_dir}"/default.profdata "${profiles[@]}"
         else
-          llvm-profdata merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
+          llvm-profdata merge -output="${build_dir}"/default.profdata "${profiles[@]}"
         fi
+      fi
+      if [[ ! -s "${build_dir}/default.profdata" ]]; then
+        echo "Error: LLVM profile merge did not produce default.profdata." >&2
+        return 1
       fi
     fi
     meson configure -Db_pgo=use "${build_dir}"
