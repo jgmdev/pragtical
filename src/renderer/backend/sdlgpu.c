@@ -2399,10 +2399,18 @@ static bool gpu_flatten_poly(
       frame->poly_points[0].x == frame->poly_points[count - 1].x &&
       frame->poly_points[0].y == frame->poly_points[count - 1].y)
     count--;
-  if (count < 3 || count > MAX_POLY_POINTS)
+  if (count > MAX_POLY_POINTS)
     goto error;
 
-  *flat_count = (unsigned short) count;
+  /* Pixel conversion or curve flattening can leave a valid but empty path.
+     Test collinearity, not signed area: self-intersecting fills can cancel. */
+  for (int i = 2; i < count; i++) {
+    if (fabs(gpu_poly_cross(&frame->poly_points[0], &frame->poly_points[1],
+                            &frame->poly_points[i])) > 0.0001) {
+      *flat_count = (unsigned short) count;
+      break;
+    }
+  }
   return true;
 
 error:
@@ -2722,6 +2730,8 @@ static bool gpu_draw_poly_native(
   unsigned short flat_count = 0;
   if (!gpu_flatten_poly(&data->frame, points, npoints, &flat_count))
     return false;
+  if (flat_count == 0)
+    return true;
 
   int max_vertices = (flat_count - 2) * 3 + flat_count * 6;
   if (!gpu_ensure_poly_vertex_scratch(&data->frame, max_vertices))
@@ -5897,6 +5907,8 @@ static bool gpu_draw_canvas_poly_native(
   unsigned short flat_count = 0;
   if (!gpu_flatten_poly(&data->frame, points, npoints, &flat_count))
     return false;
+  if (flat_count == 0)
+    return true;
 
   int max_vertices = (flat_count - 2) * 3 + flat_count * 6;
   if (!gpu_ensure_poly_vertex_scratch(&data->frame, max_vertices))

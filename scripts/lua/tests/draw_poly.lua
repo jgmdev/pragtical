@@ -7,6 +7,7 @@
 --
 -- Runs under whatever backend PRAGTICAL_RENDERER selects, so it validates the
 -- SDLGPU triangulation paths as well as the software renderer.
+-- Collapsed polygons are checked on both window and offscreen canvas targets.
 
 local test = require "core.test"
 
@@ -32,14 +33,22 @@ end
 
 -- Render a single polygon onto a fresh window and return its captured pixels
 -- plus the draw_poly control-box return value.
-local function render_poly(context, name, w, h, poly)
+local function render_poly(context, name, w, h, poly, offscreen)
   local window = renwindow.create("draw-poly-" .. name, w, h)
   test.not_nil(window)
 
   renderer.begin_frame(window)
   renderer.set_clip_rect(0, 0, w, h)
   renderer.draw_rect(0, 0, w, h, BG, true)
-  local bx, by, bw, bh = renderer.draw_poly(poly, FILL)
+  local bx, by, bw, bh
+  if offscreen then
+    local target = canvas.new(w, h, BG, true)
+    bx, by, bw, bh = target:draw_poly(poly, FILL)
+    target:render()
+    renderer.draw_canvas(target, 0, 0)
+  else
+    bx, by, bw, bh = renderer.draw_poly(poly, FILL)
+  end
   renderer.end_frame()
 
   local capture = renderer.to_canvas(window, 0, 0, w, h)
@@ -136,3 +145,51 @@ test.describe("renderer.draw_poly forms", function()
   end)
 
 end)
+
+local collapsed_polygons = {
+  { "empty", {} },
+  { "single", { {20, 20} } },
+  { "two-points", { {20, 20}, {60, 60} } },
+  { "coincident", { {20, 20}, {20, 20}, {20, 20} } },
+  { "repeated-endpoints", { {20, 20}, {20, 20}, {60, 60}, {60, 60} } },
+  { "alternating-endpoints", { {20, 20}, {60, 60}, {20, 20}, {60, 60}, {20, 20} } },
+  { "collinear", { {20, 20}, {40, 40}, {60, 60} } },
+  -- Frontra's slowing projectile trail, translated into this test window.
+  { "fractional-trail", {
+    {38.39, 45.363}, {38.59, 45.75}, {42.82, 43.492}, {42.61, 43.105}
+  } },
+  { "conic-line", { {20, 20, 40, 40, 60, 60}, {20, 20} } },
+  { "cubic-line", { {20, 20, 30, 30, 50, 50, 60, 60}, {20, 20} } },
+}
+
+for _, target in ipairs({ "window", "canvas" }) do
+  test.describe(target .. " polygon degeneracy", function()
+    local offscreen = target == "canvas"
+    for _, case in ipairs(collapsed_polygons) do
+      test.test("ignores " .. case[1] .. " without changing pixels", function(context)
+        local w, h = 96, 80
+        local pixels = render_poly(context, target .. "-" .. case[1], w, h, case[2], offscreen)
+        test.equal(pixels, string.rep(string.char(0, 0, 0, 255), w * h),
+          "a collapsed polygon must leave the background unchanged")
+      end)
+    end
+
+    test.test("keeps nonempty polygons with collinear leading points in both windings", function(context)
+      local poly = { {20, 20}, {40, 20}, {60, 20}, {60, 60}, {20, 60} }
+      for winding = 1, 2 do
+        local pixels = render_poly(context, target .. "-leading-line-" .. winding,
+          96, 80, poly, offscreen)
+        test.ok(count_fill(pixels, 96, 25, 25, 30, 30, FILL, 24) > 800)
+        local reversed = {}
+        for i = #poly, 1, -1 do reversed[#reversed + 1] = poly[i] end
+        poly = reversed
+      end
+    end)
+
+    test.test("does not discard a self-intersecting polygon with zero signed area", function(context)
+      local poly = { {20, 20}, {70, 60}, {70, 20}, {20, 60} }
+      local pixels = render_poly(context, target .. "-zero-signed-area", 96, 80, poly, offscreen)
+      test.ok(count_fill(pixels, 96, 20, 20, 50, 40, FILL, 24) > 300)
+    end)
+  end)
+end
